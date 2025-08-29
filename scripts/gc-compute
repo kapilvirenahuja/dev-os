@@ -1,0 +1,223 @@
+#!/bin/bash
+
+# Google Cloud Compute Instance Management Script
+# Usage: gc-compute <action> <instance-name>
+# Actions: create, start, stop, delete
+
+# Note: Not using 'set -e' to allow better error handling in interactive mode
+
+ZONE="us-central1-a"
+MACHINE_TYPE="e2-medium"
+IMAGE_FAMILY="ubuntu-2404-lts-amd64"
+IMAGE_PROJECT="ubuntu-os-cloud"
+BOOT_DISK_SIZE="20GB"
+
+# Ensure gcloud is in PATH
+export PATH="$HOME/google-cloud-sdk/bin:$PATH"
+
+# Check if gcloud is available
+if ! command -v gcloud &> /dev/null; then
+    echo "Error: gcloud CLI not found. Please install Google Cloud SDK."
+    exit 1
+fi
+
+# Function to show usage
+show_usage() {
+    echo "Usage: $0 <action> [instance-name]"
+    echo ""
+    echo "Actions:"
+    echo "  login     - Authenticate with Google Cloud"
+    echo "  create    - Create a new VM instance with Docker and npm"
+    echo "  start     - Start an existing VM instance"
+    echo "  stop      - Stop a running VM instance"
+    echo "  delete    - Delete a VM instance"
+    echo "  ssh       - SSH into a VM instance"
+    echo ""
+    echo "If instance-name is not provided, you'll be shown a list to select from."
+    echo ""
+    echo "Examples:"
+    echo "  $0 login"
+    echo "  $0 create my-server"
+    echo "  $0 start my-server"
+    echo "  $0 stop"
+    echo "  $0 delete"
+    echo "  $0 ssh"
+}
+
+# Function to list and select instance
+select_instance() {
+    local action=$1
+    
+    # Get list of instances in the zone
+    instances=$(gcloud compute instances list --zones="$ZONE" --format="value(name)" 2>/dev/null || true)
+    
+    if [ -z "$instances" ]; then
+        echo "No compute instances found in zone $ZONE" >&2
+        exit 1
+    fi
+    
+    # Convert to array
+    instances_array=($instances)
+    
+    echo "Available instances in zone $ZONE:" >&2
+    echo "" >&2
+    
+    # Display numbered list
+    for i in "${!instances_array[@]}"; do
+        local name="${instances_array[i]}"
+        local status=$(gcloud compute instances describe "$name" --zone="$ZONE" --format="value(status)" 2>/dev/null || echo "UNKNOWN")
+        printf "%2d. %-20s [%s]\n" $((i+1)) "$name" "$status" >&2
+    done
+    
+    echo "" >&2
+    read -p "Select instance number (1-${#instances_array[@]}): " selection >&2
+    
+    # Validate selection
+    if ! [[ "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt "${#instances_array[@]}" ]; then
+        echo "Invalid selection. Please choose a number between 1 and ${#instances_array[@]}" >&2
+        exit 1
+    fi
+    
+    # Return selected instance name (only this goes to stdout)
+    echo "${instances_array[$((selection-1))]}"
+}
+
+# Check arguments
+if [ $# -eq 0 ]; then
+    show_usage
+    exit 1
+fi
+
+ACTION=$1
+INSTANCE_NAME=${2:-}
+
+# If instance name not provided and action is not create or login, select from existing instances
+if [ -z "$INSTANCE_NAME" ]; then
+    if [ "$ACTION" = "create" ]; then
+        echo "Error: Instance name is required for create action"
+        echo ""
+        show_usage
+        exit 1
+    elif [ "$ACTION" = "login" ]; then
+        # Login doesn't need instance name
+        :
+    else
+        INSTANCE_NAME=$(select_instance "$ACTION")
+        echo "Selected instance: $INSTANCE_NAME"
+        echo ""
+    fi
+fi
+
+# Main script logic
+case $ACTION in
+    login)
+        echo "Authenticating with Google Cloud..."
+        gcloud auth login
+        echo ""
+        echo "Authentication successful!"
+        echo "Current account: $(gcloud config get-value account 2>/dev/null || echo 'None')"
+        echo "Current project: $(gcloud config get-value project 2>/dev/null || echo 'None')"
+        echo ""
+        echo "To set a project, run: gcloud config set project PROJECT_ID"
+        ;;
+    
+    create)
+        echo "Creating VM instance: $INSTANCE_NAME"
+        gcloud compute instances create "$INSTANCE_NAME" \
+            --zone="$ZONE" \
+            --machine-type="$MACHINE_TYPE" \
+            --image-family="$IMAGE_FAMILY" \
+            --image-project="$IMAGE_PROJECT" \
+            --boot-disk-size="$BOOT_DISK_SIZE" \
+            --metadata=startup-script='#!/bin/bash
+                apt-get update
+                
+                # Install Docker
+                apt-get install -y docker.io
+                systemctl start docker
+                systemctl enable docker
+                usermod -aG docker $USER
+                
+                # Install Node.js and npm
+                curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+                apt-get install -y nodejs
+                
+                # Log installation results
+                echo "Installation complete:" > /var/log/gc-compute-setup.log
+                docker --version >> /var/log/gc-compute-setup.log
+                node --version >> /var/log/gc-compute-setup.log
+                npm --version >> /var/log/gc-compute-setup.log
+                date >> /var/log/gc-compute-setup.log'
+        
+        echo "VM instance '$INSTANCE_NAME' created successfully!"
+        echo "Zone: $ZONE"
+        echo "Waiting 30 seconds for startup script to complete..."
+        sleep 30
+        
+        # Get the external IP
+        EXTERNAL_IP=$(gcloud compute instances describe "$INSTANCE_NAME" --zone="$ZONE" --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+        echo "External IP: $EXTERNAL_IP"
+        echo ""
+        echo "To connect: gcloud compute ssh $INSTANCE_NAME --zone=$ZONE"
+        ;;
+    
+    start)
+        echo "Starting VM instance: $INSTANCE_NAME"
+        gcloud compute instances start "$INSTANCE_NAME" --zone="$ZONE"
+        echo "VM instance '$INSTANCE_NAME' started successfully!"
+        ;;
+    
+    stop)
+        echo "Stopping VM instance: $INSTANCE_NAME"
+        gcloud compute instances stop "$INSTANCE_NAME" --zone="$ZONE"
+        echo "VM instance '$INSTANCE_NAME' stopped successfully!"
+        ;;
+    
+    delete)
+        echo "Deleting VM instance: $INSTANCE_NAME"
+        read -p "Are you sure you want to delete '$INSTANCE_NAME'? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            gcloud compute instances delete "$INSTANCE_NAME" --zone="$ZONE" --quiet
+            echo "VM instance '$INSTANCE_NAME' deleted successfully!"
+        else
+            echo "Delete operation cancelled."
+        fi
+        ;;
+    
+    ssh)
+        echo "Connecting to VM instance: $INSTANCE_NAME"
+        
+        # Check if instance is running
+        STATUS=$(gcloud compute instances describe "$INSTANCE_NAME" --zone="$ZONE" --format="value(status)" 2>/dev/null || echo "NOT_FOUND")
+        
+        if [ "$STATUS" = "NOT_FOUND" ]; then
+            echo "Error: Instance '$INSTANCE_NAME' not found"
+            exit 1
+        elif [ "$STATUS" != "RUNNING" ]; then
+            echo "Warning: Instance '$INSTANCE_NAME' is not running (status: $STATUS)"
+            read -p "Do you want to start it first? (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                echo "Starting instance..."
+                gcloud compute instances start "$INSTANCE_NAME" --zone="$ZONE"
+                echo "Waiting for instance to be ready..."
+                sleep 15
+            else
+                echo "Cannot SSH to a stopped instance. Exiting."
+                exit 1
+            fi
+        fi
+        
+        # SSH into the instance
+        echo "Connecting via SSH..."
+        gcloud compute ssh "$INSTANCE_NAME" --zone="$ZONE"
+        ;;
+    
+    *)
+        echo "Error: Invalid action '$ACTION'"
+        echo ""
+        show_usage
+        exit 1
+        ;;
+esac
