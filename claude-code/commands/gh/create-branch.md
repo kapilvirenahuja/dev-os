@@ -10,9 +10,13 @@ Creates a new git branch from the current branch and switches to it.
 
 
 # Branch Naming Conventions
-- `feature/`   - New features
-- `bugfix/`    - Bug fixes
-- `hotfix/`    - Critical fixes
-- `chore/`     - Maintenance tasks
-- `docs/`      - Documentation updates
-- `resarch/`   - trying out new things
+- Format: feature/{issue-id}-{descriptive-name}
+- Descriptive name: max 15 characters, kebab-case
+- Example: feature/27-gh-commands-auto
+- Possible options:
+    - `feature/`   - New features
+    - `bugfix/`    - Bug fixes
+    - `hotfix/`    - Critical fixes
+    - `chore/`     - Maintenance tasks
+    - `docs/`      - Documentation updates
+    - `resarch/`   - trying out new things
