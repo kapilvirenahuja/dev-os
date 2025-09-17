@@ -202,16 +202,16 @@ context_usage_line=$(get_context_info "$ccusage_output")
 
 # Output all 5 status lines
 # Line 1: Model and output style
-echo -e "\\033[37m🤖\\033[0m ${model_name} | \\033[35m🎨 ${output_style}\\033[0m"
+echo -e "\\033[1;30;47m ◉ \\033[0m ${model_name} | \\033[1;30;45m ✦ \\033[0m ${output_style}"
 
 # Line 2: Project info and git branch
-echo -e "\\033[37m📁\\033[0m ${project_name}\\033[36m${project_path}\\033[0m | ${git_info}"
+echo -e "\\033[1;30;43m ▲ \\033[0m ${project_name}\\033[36m${project_path}\\033[0m | ${git_info}"
 
 # Line 3: Context usage
-echo -e "\\033[37m💾\\033[0m Context: \\033[96m${context_usage_line}\\033[0m"
+echo -e "\\033[1;30;44m ● \\033[0m Context: \\033[96m${context_usage_line}\\033[0m"
 
 # Line 4: Cost information
-echo -e "\\033[35m💰\\033[0m ${cost_info}"
+echo -e "\\033[1;30;42m $ \\033[0m ${cost_info}"
 
 # Line 5: Horizontal separator line
 echo "-------------------------------"
